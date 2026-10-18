@@ -30,23 +30,35 @@ textarea{width:100%;min-height:55vh;padding:14px;border:1px solid var(--line);bo
 .row{display:flex;gap:8px;margin-top:10px;flex-wrap:wrap;align-items:center}
 .row .sp{flex:1}
 .foot{margin-top:30px;padding-top:14px;border-top:1px solid var(--line);color:var(--mute);font-size:13px}
-.foot .row{margin-top:8px}
+.err{color:var(--danger);font-size:14px;margin-top:12px}
+.login{text-align:center;padding-top:12vh}
+.login .sub{margin-bottom:22px}
+.who{display:flex;align-items:center;gap:8px;justify-content:space-between;margin-bottom:6px}
+.who span{color:var(--mute);font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 [hidden]{display:none!important}
 </style>
 </head>
 <body>
 <div class="wrap">
 
-<section id="list">
+<section id="login" class="login" hidden>
   <h1>Mis notas</h1>
-  <p class="sub">Solo tú ves lo que escribes aquí. Se guarda en este navegador, en este dispositivo.</p>
+  <p class="sub">Entra con tu cuenta de Google. Tus notas se guardan en la nube y solo tú las ves, desde cualquier dispositivo.</p>
+  <button class="main" id="go">Entrar con Google</button>
+  <div class="err" id="loginErr"></div>
+</section>
+
+<section id="list" hidden>
+  <div class="who"><span id="mail"></span><button id="out">Salir</button></div>
+  <h1>Mis notas</h1>
+  <p class="sub">Guardadas en tu cuenta. Nadie más puede verlas.</p>
   <div class="bar">
     <input type="search" id="q" placeholder="Buscar en mis notas" aria-label="Buscar en mis notas">
     <button class="main" id="new">Nueva nota</button>
   </div>
   <div id="items"></div>
   <div class="foot">
-    <div>Copia de seguridad: descarga tus notas para guardarlas o pasarlas a otro dispositivo. Si borras los datos del navegador, las notas se pierden.</div>
+    <div>Copia extra: descarga tus notas en un archivo, o carga una copia anterior.</div>
     <div class="row">
       <button id="exp">Descargar copia</button>
       <button id="imp">Cargar copia</button>
@@ -63,45 +75,126 @@ textarea{width:100%;min-height:55vh;padding:14px;border:1px solid var(--line);bo
 </section>
 
 </div>
-<script>
-(function(){
-var KEY="notas-privadas-v1",notes=[],cur=null;
-var $=function(id){return document.getElementById(id)};
-function load(){try{notes=JSON.parse(localStorage.getItem(KEY)||"[]")}catch(e){notes=[]}if(!Array.isArray(notes))notes=[]}
-function save(){try{localStorage.setItem(KEY,JSON.stringify(notes));return true}catch(e){$("saved").textContent="No se pudo guardar. Descarga una copia.";return false}}
-function fmt(ts){return new Date(ts).toLocaleDateString("es",{day:"numeric",month:"short",year:"numeric"})}
+
+<script type="module">
+import {initializeApp} from "https://www.gstatic.com/firebasejs/10.14.1/firebase-app.js";
+import {getAuth,GoogleAuthProvider,signInWithPopup,onAuthStateChanged,signOut} from "https://www.gstatic.com/firebasejs/10.14.1/firebase-auth.js";
+import {initializeFirestore,getFirestore,persistentLocalCache,collection,doc,setDoc,deleteDoc,onSnapshot} from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
+
+const firebaseConfig={
+  apiKey:"AIzaSyA9fD4Ej5HxJZ9qp4dH7byu7WDjwJzDvd0",
+  authDomain:"rift-e76f9.firebaseapp.com",
+  projectId:"rift-e76f9",
+  storageBucket:"rift-e76f9.firebasestorage.app",
+  messagingSenderId:"394393512244",
+  appId:"1:394393512244:web:7dd81f9f79fb01a6f45d61"
+};
+
+const app=initializeApp(firebaseConfig);
+const auth=getAuth(app);
+let db;
+try{db=initializeFirestore(app,{localCache:persistentLocalCache()})}catch(e){db=getFirestore(app)}
+
+const $=id=>document.getElementById(id);
+let uid=null,notes=[],curId=null,timer=null,unsub=null;
+
+function view(v){["login","list","edit"].forEach(x=>$(x).hidden=x!==v);window.scrollTo(0,0)}
+const col=()=>collection(db,"users",uid,"notes");
+const ref=id=>doc(db,"users",uid,"notes",id);
+const fmt=ts=>new Date(ts).toLocaleDateString("es",{day:"numeric",month:"short",year:"numeric"});
+
 function render(){
-  var q=$("q").value.trim().toLowerCase(),box=$("items");box.innerHTML="";
-  var list=notes.slice().sort(function(a,b){return b.updated-a.updated}).filter(function(n){return !q||(n.title+" "+n.body).toLowerCase().indexOf(q)>-1});
-  if(!list.length){var e=document.createElement("div");e.className="empty";e.textContent=notes.length?"No hay notas que coincidan con tu búsqueda.":"Aún no tienes notas. Toca Nueva nota para escribir la primera.";box.appendChild(e);return}
-  list.forEach(function(n){
-    var b=document.createElement("button");b.className="note";
-    var t=document.createElement("b");t.textContent=n.title||"Sin título";
-    var s=document.createElement("small");s.textContent=fmt(n.updated);
-    var p=document.createElement("p");p.textContent=n.body;
-    b.append(t,s,p);b.onclick=function(){open(n.id)};box.appendChild(b)});
+  const q=$("q").value.trim().toLowerCase(),box=$("items");box.innerHTML="";
+  const list=notes.slice().sort((a,b)=>b.updated-a.updated).filter(n=>!q||(n.title+" "+n.body).toLowerCase().includes(q));
+  if(!list.length){const e=document.createElement("div");e.className="empty";e.textContent=notes.length?"No hay notas que coincidan con tu búsqueda.":"Aún no tienes notas. Toca Nueva nota para escribir la primera.";box.appendChild(e);return}
+  list.forEach(n=>{
+    const b=document.createElement("button");b.className="note";
+    const t=document.createElement("b");t.textContent=n.title||"Sin título";
+    const s=document.createElement("small");s.textContent=fmt(n.updated);
+    const p=document.createElement("p");p.textContent=n.body;
+    b.append(t,s,p);b.onclick=()=>openNote(n.id);box.appendChild(b)});
 }
-function show(v){$("list").hidden=v!=="list";$("edit").hidden=v!=="edit";window.scrollTo(0,0)}
-function open(id){cur=notes.find(function(n){return n.id===id});if(!cur)return;$("t").value=cur.title;$("b").value=cur.body;$("saved").textContent="";show("edit")}
-function touch(){if(!cur)return;cur.title=$("t").value;cur.body=$("b").value;cur.updated=Date.now();if(save())$("saved").textContent="Guardado"}
-$("new").onclick=function(){var n={id:String(Date.now())+Math.random().toString(36).slice(2,6),title:"",body:"",updated:Date.now()};notes.push(n);save();open(n.id);$("t").focus()};
+
+function openNote(id){
+  const n=notes.find(x=>x.id===id);if(!n)return;
+  curId=id;$("t").value=n.title;$("b").value=n.body;$("saved").textContent="";view("edit");
+}
+async function saveNow(){
+  clearTimeout(timer);timer=null;if(!curId)return;
+  try{await setDoc(ref(curId),{title:$("t").value,body:$("b").value,updated:Date.now()});$("saved").textContent="Guardado"}
+  catch(e){$("saved").textContent="No se pudo guardar. Revisa tu conexión."}
+}
+function touch(){$("saved").textContent="Guardando...";clearTimeout(timer);timer=setTimeout(saveNow,500)}
+
 $("t").oninput=touch;$("b").oninput=touch;
-$("back").onclick=function(){if(cur&&!cur.title.trim()&&!cur.body.trim()){notes=notes.filter(function(n){return n!==cur});save()}cur=null;render();show("list")};
-$("del").onclick=function(){if(cur&&confirm("¿Borrar esta nota? No se puede deshacer.")){notes=notes.filter(function(n){return n!==cur});save();cur=null;render();show("list")}};
 $("q").oninput=render;
-$("exp").onclick=function(){var a=document.createElement("a");a.href=URL.createObjectURL(new Blob([JSON.stringify(notes,null,2)],{type:"application/json"}));a.download="mis-notas.json";a.click()};
-$("imp").onclick=function(){$("file").click()};
+
+$("new").onclick=async()=>{
+  const id=String(Date.now())+Math.random().toString(36).slice(2,6);
+  notes.push({id,title:"",body:"",updated:Date.now()});
+  curId=id;$("t").value="";$("b").value="";$("saved").textContent="";view("edit");$("t").focus();
+  try{await setDoc(ref(id),{title:"",body:"",updated:Date.now()})}catch(e){}
+};
+$("back").onclick=async()=>{
+  const empty=!$("t").value.trim()&&!$("b").value.trim();
+  if(empty&&curId){clearTimeout(timer);const id=curId;curId=null;try{await deleteDoc(ref(id))}catch(e){}}
+  else await saveNow();
+  curId=null;render();view("list");
+};
+$("del").onclick=async()=>{
+  if(!curId||!confirm("¿Borrar esta nota? No se puede deshacer."))return;
+  clearTimeout(timer);const id=curId;curId=null;
+  try{await deleteDoc(ref(id))}catch(e){}
+  render();view("list");
+};
+
+$("exp").onclick=()=>{
+  const a=document.createElement("a");
+  a.href=URL.createObjectURL(new Blob([JSON.stringify(notes,null,2)],{type:"application/json"}));
+  a.download="mis-notas.json";a.click();
+};
+$("imp").onclick=()=>$("file").click();
 $("file").onchange=function(){
-  var f=this.files[0];if(!f)return;var r=new FileReader();
-  r.onload=function(){try{
-    var d=JSON.parse(r.result);if(!Array.isArray(d))throw 0;
-    var ids={};notes.forEach(function(n){ids[n.id]=1});var add=0;
-    d.forEach(function(n){if(n&&typeof n.body==="string"&&!ids[n.id]){notes.push({id:String(n.id),title:String(n.title||""),body:n.body,updated:+n.updated||Date.now()});add++}});
-    save();render();alert("Se cargaron "+add+" notas.")
-  }catch(e){alert("El archivo no es una copia válida de notas.")}};
-  r.readAsText(f);this.value=""};
-load();render();
-})();
+  const f=this.files[0];if(!f)return;const r=new FileReader();
+  r.onload=async()=>{
+    try{
+      const d=JSON.parse(r.result);if(!Array.isArray(d))throw 0;
+      const have=new Set(notes.map(n=>n.id));let add=0;
+      for(const n of d){
+        if(n&&typeof n.body==="string"){
+          const id=have.has(String(n.id))?String(Date.now())+Math.random().toString(36).slice(2,6):String(n.id||Date.now()+Math.random().toString(36).slice(2,6));
+          await setDoc(ref(id),{title:String(n.title||""),body:n.body,updated:+n.updated||Date.now()});add++;
+        }
+      }
+      alert("Se cargaron "+add+" notas.");
+    }catch(e){alert("El archivo no es una copia válida de notas.")}
+  };
+  r.readAsText(f);this.value="";
+};
+
+$("go").onclick=async()=>{
+  $("loginErr").textContent="";
+  try{await signInWithPopup(auth,new GoogleAuthProvider())}
+  catch(e){
+    const m={"auth/unauthorized-domain":"Este dominio no está autorizado en Firebase. Agrégalo en Authentication, Configuración, Dominios autorizados.",
+      "auth/popup-blocked":"El navegador bloqueó la ventana. Permite ventanas emergentes y vuelve a intentar.",
+      "auth/popup-closed-by-user":"Cerraste la ventana antes de terminar. Intenta otra vez.",
+      "auth/operation-not-allowed":"El acceso con Google no está activado en Firebase.",
+      "auth/api-key-not-valid.-please-pass-a-valid-api-key.":"La apiKey del código no es válida. Revisa que esté copiada exacta."};
+    $("loginErr").textContent=m[e.code]||("No se pudo entrar: "+(e.code||e.message));
+  }
+};
+$("out").onclick=()=>signOut(auth);
+
+onAuthStateChanged(auth,user=>{
+  if(unsub){unsub();unsub=null}
+  if(!user){uid=null;notes=[];curId=null;view("login");return}
+  uid=user.uid;$("mail").textContent=user.email||"";view("list");
+  unsub=onSnapshot(col(),snap=>{
+    notes=snap.docs.map(d=>({id:d.id,title:d.data().title||"",body:d.data().body||"",updated:d.data().updated||0}));
+    if(!curId)render();else{const keep=curId;render();curId=keep}
+  },err=>{$("items").innerHTML="";const e=document.createElement("div");e.className="empty";e.textContent="No se pudieron cargar las notas. Revisa que Firestore y sus reglas estén publicadas.";$("items").appendChild(e)});
+});
 </script>
 </body>
 </html>
