@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mis notas</title>
+<style>
+:root{--bg:#eef1f4;--card:#fff;--ink:#1b2430;--mute:#5d6b7a;--line:#d3dae1;--acc:#1f6f78;--accink:#fff;--danger:#a63d40}
+@media (prefers-color-scheme:dark){:root{--bg:#141a21;--card:#1d252e;--ink:#e6ebf0;--mute:#93a1b0;--line:#2f3a46;--acc:#58b4bd;--accink:#0f1a1c;--danger:#e07e80}}
+*{box-sizing:border-box}
+html,body{margin:0}
+body{background:var(--bg);color:var(--ink);font:16px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif;min-height:100vh}
+.wrap{max-width:680px;margin:0 auto;padding:20px 16px 60px}
+h1{font:600 28px/1.2 Georgia,"Iowan Old Style",serif;margin:8px 0 4px}
+.sub{color:var(--mute);margin:0 0 18px;font-size:14px}
+.bar{display:flex;gap:8px;margin-bottom:14px}
+input,textarea,button{font:inherit;color:inherit}
+input[type=search],.title{flex:1;width:100%;padding:11px 12px;border:1px solid var(--line);border-radius:8px;background:var(--card)}
+button{padding:10px 14px;border-radius:8px;border:1px solid var(--line);background:var(--card);cursor:pointer}
+button.main{background:var(--acc);color:var(--accink);border-color:var(--acc);font-weight:600}
+button.del{color:var(--danger)}
+button:focus-visible,input:focus-visible,textarea:focus-visible{outline:2px solid var(--acc);outline-offset:2px}
+.note{display:block;width:100%;text-align:left;margin-bottom:10px;padding:14px;border-radius:10px}
+.note b{display:block;font:600 18px Georgia,serif}
+.note small{color:var(--mute)}
+.note p{margin:6px 0 0;color:var(--mute);font-size:14px;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}
+.empty{color:var(--mute);text-align:center;padding:36px 8px;border:1px dashed var(--line);border-radius:10px}
+.title{font:600 22px Georgia,serif;margin-bottom:10px}
+textarea{width:100%;min-height:55vh;padding:14px;border:1px solid var(--line);border-radius:8px;background:var(--card);font:17px/1.7 Georgia,"Iowan Old Style",serif;resize:vertical}
+.row{display:flex;gap:8px;margin-top:10px;flex-wrap:wrap;align-items:center}
+.row .sp{flex:1}
+.foot{margin-top:30px;padding-top:14px;border-top:1px solid var(--line);color:var(--mute);font-size:13px}
+.foot .row{margin-top:8px}
+[hidden]{display:none!important}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<section id="list">
+  <h1>Mis notas</h1>
+  <p class="sub">Solo tú ves lo que escribes aquí. Se guarda en este navegador, en este dispositivo.</p>
+  <div class="bar">
+    <input type="search" id="q" placeholder="Buscar en mis notas" aria-label="Buscar en mis notas">
+    <button class="main" id="new">Nueva nota</button>
+  </div>
+  <div id="items"></div>
+  <div class="foot">
+    <div>Copia de seguridad: descarga tus notas para guardarlas o pasarlas a otro dispositivo. Si borras los datos del navegador, las notas se pierden.</div>
+    <div class="row">
+      <button id="exp">Descargar copia</button>
+      <button id="imp">Cargar copia</button>
+      <input type="file" id="file" accept="application/json" hidden>
+    </div>
+  </div>
+</section>
+
+<section id="edit" hidden>
+  <div class="row" style="margin:0 0 12px"><button id="back">Volver</button><span class="sp"></span><small id="saved" class="sub" style="margin:0"></small></div>
+  <input class="title" id="t" placeholder="Título" aria-label="Título">
+  <textarea id="b" placeholder="Escribe aquí..." aria-label="Texto de la nota"></textarea>
+  <div class="row"><button class="del" id="del">Borrar nota</button></div>
+</section>
+
+</div>
+<script>
+(function(){
+var KEY="notas-privadas-v1",notes=[],cur=null;
+var $=function(id){return document.getElementById(id)};
+function load(){try{notes=JSON.parse(localStorage.getItem(KEY)||"[]")}catch(e){notes=[]}if(!Array.isArray(notes))notes=[]}
+function save(){try{localStorage.setItem(KEY,JSON.stringify(notes));return true}catch(e){$("saved").textContent="No se pudo guardar. Descarga una copia.";return false}}
+function fmt(ts){return new Date(ts).toLocaleDateString("es",{day:"numeric",month:"short",year:"numeric"})}
+function render(){
+  var q=$("q").value.trim().toLowerCase(),box=$("items");box.innerHTML="";
+  var list=notes.slice().sort(function(a,b){return b.updated-a.updated}).filter(function(n){return !q||(n.title+" "+n.body).toLowerCase().indexOf(q)>-1});
+  if(!list.length){var e=document.createElement("div");e.className="empty";e.textContent=notes.length?"No hay notas que coincidan con tu búsqueda.":"Aún no tienes notas. Toca Nueva nota para escribir la primera.";box.appendChild(e);return}
+  list.forEach(function(n){
+    var b=document.createElement("button");b.className="note";
+    var t=document.createElement("b");t.textContent=n.title||"Sin título";
+    var s=document.createElement("small");s.textContent=fmt(n.updated);
+    var p=document.createElement("p");p.textContent=n.body;
+    b.append(t,s,p);b.onclick=function(){open(n.id)};box.appendChild(b)});
+}
+function show(v){$("list").hidden=v!=="list";$("edit").hidden=v!=="edit";window.scrollTo(0,0)}
+function open(id){cur=notes.find(function(n){return n.id===id});if(!cur)return;$("t").value=cur.title;$("b").value=cur.body;$("saved").textContent="";show("edit")}
+function touch(){if(!cur)return;cur.title=$("t").value;cur.body=$("b").value;cur.updated=Date.now();if(save())$("saved").textContent="Guardado"}
+$("new").onclick=function(){var n={id:String(Date.now())+Math.random().toString(36).slice(2,6),title:"",body:"",updated:Date.now()};notes.push(n);save();open(n.id);$("t").focus()};
+$("t").oninput=touch;$("b").oninput=touch;
+$("back").onclick=function(){if(cur&&!cur.title.trim()&&!cur.body.trim()){notes=notes.filter(function(n){return n!==cur});save()}cur=null;render();show("list")};
+$("del").onclick=function(){if(cur&&confirm("¿Borrar esta nota? No se puede deshacer.")){notes=notes.filter(function(n){return n!==cur});save();cur=null;render();show("list")}};
+$("q").oninput=render;
+$("exp").onclick=function(){var a=document.createElement("a");a.href=URL.createObjectURL(new Blob([JSON.stringify(notes,null,2)],{type:"application/json"}));a.download="mis-notas.json";a.click()};
+$("imp").onclick=function(){$("file").click()};
+$("file").onchange=function(){
+  var f=this.files[0];if(!f)return;var r=new FileReader();
+  r.onload=function(){try{
+    var d=JSON.parse(r.result);if(!Array.isArray(d))throw 0;
+    var ids={};notes.forEach(function(n){ids[n.id]=1});var add=0;
+    d.forEach(function(n){if(n&&typeof n.body==="string"&&!ids[n.id]){notes.push({id:String(n.id),title:String(n.title||""),body:n.body,updated:+n.updated||Date.now()});add++}});
+    save();render();alert("Se cargaron "+add+" notas.")
+  }catch(e){alert("El archivo no es una copia válida de notas.")}};
+  r.readAsText(f);this.value=""};
+load();render();
+})();
+</script>
+</body>
+</html>
